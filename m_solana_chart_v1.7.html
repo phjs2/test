@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>업비트 SOL/KRW 시세 분석</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 1rem;
+      background: #f2f2f2;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+    }
+
+    h2 {
+      text-align: center;
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>📊 업비트 SOL/KRW 시세 분석 (1일봉)</h2>
+    <pre id="output">조회 중...</pre>
+  </div>
+
+  <script>
+    // 기존 fetchData 함수 그대로 사용
+    async function fetchData() {
+      const market = 'KRW-SOL';
+      const output = document.getElementById('output');
+      const now = new Date().toLocaleString();
+
+      const res = await fetch(`https://api.upbit.com/v1/candles/days?market=${market}&count=200`);
+      const candles = await res.json();
+      const closes = candles.map(c => c.trade_price).reverse();
+      const volumes = candles.map(c => c.candle_acc_trade_volume).reverse();
+
+      const sma = (arr, len) => {
+        const out = [];
+        for (let i = len - 1; i < arr.length; i++) {
+          const slice = arr.slice(i - len + 1, i + 1);
+          out.push(slice.reduce((a, b) => a + b, 0) / len);
+        }
+        return out;
+      };
+
+      const EMA = (data, period) => {
+        const k = 2 / (period + 1);
+        const ema = [data[0]];
+        for (let i = 1; i < data.length; i++) {
+          ema.push(data[i] * k + ema[i - 1] * (1 - k));
+        }
+        return ema;
+      };
+
+      // RSI
+      const rsiPeriod = 14;
+      const rsiValues = [];
+      let gainSum = 0, lossSum = 0;
+
+      for (let i = 1; i <= rsiPeriod; i++) {
+        const diff = closes[i] - closes[i - 1];
+        if (diff >= 0) gainSum += diff;
+        else lossSum -= diff;
+      }
+
+      let avgGain = gainSum / rsiPeriod;
+      let avgLoss = lossSum / rsiPeriod;
+      rsiValues.push(100 - (100 / (1 + avgGain / avgLoss)));
+
+      for (let i = rsiPeriod + 1; i < closes.length; i++) {
+        const diff = closes[i] - closes[i - 1];
+        const gain = diff > 0 ? diff : 0;
+        const loss = diff < 0 ? -diff : 0;
+
+        avgGain = (avgGain * (rsiPeriod - 1) + gain) / rsiPeriod;
+        avgLoss = (avgLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
+
+        const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+        rsiValues.push(100 - (100 / (1 + rs)));
+      }
+
+      const rsiSignalArr = EMA(rsiValues, 9);
+      const latestRSI = rsiValues.at(-1);
+      const latestSignal = rsiSignalArr.at(-1);
+
+      // MACD
+      const ema12 = EMA(closes, 12);
+      const ema26 = EMA(closes, 26);
+      const macdLine = ema12.map((val, i) => val - ema26[i]);
+      const signalLine = EMA(macdLine.slice(ema26.length - macdLine.length), 9);
+      const latestMACD = macdLine.at(-1);
+      const latestMACDSignal = signalLine.at(-1);
+      const cross = latestMACD > latestMACDSignal ? '골든크로스' : '데드크로스';
+
+      // 이동평균선
+      const ma5 = sma(closes, 5).at(-1).toFixed(0);
+      const ma20 = sma(closes, 20).at(-1).toFixed(0);
+      const ma60 = sma(closes, 60).at(-1).toFixed(0);
+      const ma120 = sma(closes, 120).at(-1).toFixed(0);
+      const ma200 = sma(closes, 200).at(-1).toFixed(0);
+
+      const volume = candles[0].candle_acc_trade_volume.toFixed(2);
+
+      const result = `
+📅 날짜: ${now}
+📊 차트: 업비트 SOL/KRW / 1일봉
+📈 이동평균선:
+- 5일선: ${ma5}
+- 20일선: ${ma20}
+- 60일선: ${ma60}
+- 120일선: ${ma120}
+- 200일선: ${ma200}
+
+📉 RSI: ${latestRSI.toFixed(2)} / 시그널: ${latestSignal.toFixed(2)}
+📉 MACD: ${latestMACD.toFixed(2)} / 시그널: ${latestMACDSignal.toFixed(2)} → ${cross}
+📊 거래량: ${volume} SOL
+      `;
+      output.textContent = result;
+    }
+
+    fetchData();
+  </script>
+</body>
+</html>
